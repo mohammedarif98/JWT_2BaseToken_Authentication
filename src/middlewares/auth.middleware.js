@@ -3,20 +3,25 @@ import jwt from 'jsonwebtoken';
 import jwtConfig from '../config/jwt.configration.js';
 
 
-export const authenticateUser = async(req, res, next) => {
+export const authenticateUser = async (req, res, next) => {
     const authHeader = req.headers.authorization;
-
-    if(authHeader){
-        const token = authHeader.split(' ')[1];
-        
-        jwt.verify(token, jwtConfig.accessToken, (error, user) => {
-        if(error){
-            return res.status(403).json({ success: false, message: "Fobidden- invalid token" });
+    const accessToken = authHeader?.split(' ')[1];
+    
+    if (accessToken) {
+        try {
+            const decoded = jwt.verify(accessToken, jwtConfig.accessToken);
+            req.user = { userId: decoded.userId };
+            return next();
+        } catch (error) {
+            return res.status(403).json({ 
+                success: false, 
+                message: "Invalid or expired access token" 
+            });
         }
-        req.user = user
-        next()
-    })
-    }else{
-        res.status(500).json({ success: false, message: "Unauthorized - No token provided" })
     }
-}
+
+    return res.status(401).json({ 
+        success: false, 
+        message: "Access token is required" 
+    });
+};
