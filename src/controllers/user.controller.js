@@ -5,7 +5,7 @@ export const getUser = async(req, res) => {
     try{
         const userId = req.user.userId;
 
-        const user = await User.findById(userId).select("-password");
+        const user = await User.findById(userId).select("-password -refreshToken");
         if(!user){
             return res.status(404).json({ success: false, message: "User not found!" });
         }

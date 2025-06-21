@@ -1,9 +1,12 @@
-import { comparePasswords, hashPassword } from "../utils/passwordUtils.js";
-import { generateAccessToken, generateRefreshToken } from "../utils/generateTokens.js";
+import jwt from "jsonwebtoken";
 import User from '../models/user.model.js'
 import jwtConfig from "../config/jwt.configration.js";
+import TokenBlacklist from '../models/tokenBlacklist.model.js';
+import { comparePasswords, hashPassword } from "../utils/passwordUtils.js";
 import { compareRefreshToken, hashRefreshToken } from "../utils/hashToken.js";
-import jwt from "jsonwebtoken";
+import { generateAccessToken, generateRefreshToken } from "../utils/generateTokens.js";
+
+
 
 
 export const register = async(req, res) => {
@@ -94,6 +97,22 @@ export const login = async(req, res) => {
 export const logout = async (req, res) => {
     try {
         const userId = req.user.userId;
+        const accessToken = req.headers?.authorization?.split(' ')[1];
+
+        if(accessToken){
+            try {
+                const decodedAccess = jwt.decode(accessToken);
+                if(decodedAccess && decodedAccess.exp){
+                    await TokenBlacklist.create({ 
+                        token: accessToken,
+                        userId: userId,
+                        expiresAt: new Date(decodedAccess.exp * 1000) 
+                    });
+                }
+            } catch(blacklistError){
+                console.error("Error blacklisting access token:", blacklistError);
+            }
+        }
 
         await User.findByIdAndUpdate(userId, { refreshToken: null, refreshTokenExpires: null });
 
@@ -112,46 +131,45 @@ export const logout = async (req, res) => {
 
 
 
-export const refreshAccessToken = async(req, res) => {
-    try{
-        const refreshToken = req.cookies?.["refreshToken"];
+export const refreshAccessToken = async (req, res) => {
+    try {
+        const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
         if(!refreshToken){
-            return res.status(401).json({ success: false, message: "Refresh token is required!" });
+            return res.status(401).json({ success: false, message: "No refresh token provided" });
         }
-
-        // Verify refresh token
+        
         const decoded = jwt.verify(refreshToken, jwtConfig.refreshToken);
+        const userId = decoded.userId;
 
-        // Find user and verify stored refresh token matches
-        const user = await User.findById({ _id: decoded.userId, refreshTokenExpires: {$gt: new Date()} }).select("+refreshToken");
+        // Find user with valid refresh token
+        const user = await User.findOne({ 
+            _id: userId, refreshTokenExpires: { $gt: new Date() }
+        }).select('+refreshToken');
+
         if(!user){
-            return res.status(403).json({ success: false, message: "Invalid refresh token!" })
+            return res.status(403).json({ success: false, message: "Session expired. Please login again" });
         }
 
         // Compare with stored hashed refresh token
-        const isTokenValid = await compareRefreshToken(refreshToken, user.refreshToken)
+        const isTokenValid = await compareRefreshToken(refreshToken, user.refreshToken);
         if(!isTokenValid){
-            return res.status(403).json({ success: false, message: "Refresh token is invalid or expired" })
+            return res.status(403).json({ success: false, message: "Refresh token is invalid" });
         }
 
-        // generate new access token
-        const newAccessToken = generateAccessToken(user._id);
+        const newAccessToken = generateAccessToken(user._id);               // Generate new tokens
 
-        return res.status(200).json({ success: true, message: "Access token refreshed", data: { accessToken: newAccessToken } });
+        return res.status(200).json({ 
+            success: true, 
+            message: "Access token refreshed", 
+            data: { 
+                accessToken: newAccessToken,
+            } 
+        });
 
-    }catch(error){
-        console.log("error in refresh token: ", error.message);
-
-        if (error.name === 'TokenExpiredError') {
-            return res.status(403).json({ success: false, message: "Refresh token expired" });
-        }
-        if (error.name === 'JsonWebTokenError') {
-            return res.status(403).json({ success: false, message: "Invalid refresh token" });
-        }
-
-        return res.status(500).json({ success: false, message: "Error refreshing access token" });
+    } catch (error) {
+        console.error("Refresh token error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error during token refresh" });
     }
-}
-
+};
 
 

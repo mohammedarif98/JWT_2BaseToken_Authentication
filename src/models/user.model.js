@@ -32,6 +32,7 @@ const userSchema = new mongoose.Schema({
     { timestamps: true}
 );
 
+
 userSchema.index({ refreshToken: 1 });
 
 userSchema.pre('save', async function(next) {
